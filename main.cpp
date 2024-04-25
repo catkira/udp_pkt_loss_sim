@@ -7,7 +7,7 @@
 #include <cstdlib>
 #include <random>
 
-#define BUFFER_SIZE 2048
+constexpr unsigned BUFFER_SIZE = 2048;
 
 int main(int argc, char *argv[]) {
     if (argc != 7) {
