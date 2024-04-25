@@ -5,16 +5,18 @@
 #include <unistd.h>
 #include <cstring>
 #include <cstdlib>
+#include <random>
 
 #define BUFFER_SIZE 2048
 
 int main(int argc, char *argv[]) {
-    if (argc != 5) {
-        std::cerr << "Usage: " << argv[0] << " -s <source_port> -d <destination_port>" << std::endl;
+    if (argc != 7) {
+        std::cerr << "Usage: " << argv[0] << " -s <source_port> -d <destination_port> -p <loss probability>" << std::endl;
         return 1;
     }
 
     int sourcePort = 0, destinationPort = 0;
+    float lossProb = 0;
 
     // Parse command line arguments
     for (int i = 1; i < argc; i += 2) {
@@ -22,6 +24,8 @@ int main(int argc, char *argv[]) {
             sourcePort = std::atoi(argv[i + 1]);
         } else if (strcmp(argv[i], "-d") == 0) {
             destinationPort = std::atoi(argv[i + 1]);
+        } else if (strcmp(argv[i], "-p") == 0) {
+            lossProb = std::atof(argv[i + 1]);
         } else {
             std::cerr << "Invalid option: " << argv[i] << std::endl;
             return 1;
@@ -68,7 +72,12 @@ int main(int argc, char *argv[]) {
     destinationAddr.sin_family = AF_INET;
     destinationAddr.sin_port = htons(destinationPort);
 
+    std::random_device r;
+    std::default_random_engine e1(r());
+    std::uniform_int_distribution<int> uniform_dist(0, 10000);
+
     // Forward RTP stream
+    unsigned int pktCnt = 0;
     while (true) {
         ssize_t bytesRead = recv(sourceSocket, buffer, BUFFER_SIZE, 0);
         if (bytesRead == -1) {
@@ -78,11 +87,19 @@ int main(int argc, char *argv[]) {
             std::cout << "Source socket closed" << std::endl;
             break;
         }
-        ssize_t bytesSent = sendto(destinationSocket, buffer, bytesRead, 0, (struct sockaddr *)&destinationAddr, sizeof(destinationAddr));
-        if (bytesSent == -1) {
-            perror("Error forwarding to destination socket");
-            break;
+
+        pktCnt++;
+        float randVal = static_cast<float>(uniform_dist(e1)) / 10000;
+        if (randVal >= lossProb) {
+            ssize_t bytesSent = sendto(destinationSocket, buffer, bytesRead, 0, (struct sockaddr *)&destinationAddr, sizeof(destinationAddr));
+            if (bytesSent == -1) {
+                perror("Error forwarding to destination socket");
+                break;
+            }
+        } else {
+            printf("dropping packet number %i\n", pktCnt);
         }
+        pktCnt++;
     }
 
     // Close sockets
