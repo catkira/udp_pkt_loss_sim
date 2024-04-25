@@ -1,39 +1,47 @@
 #include <iostream>
+#include <random>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <cstring>
-#include <cstdlib>
-#include <random>
+#include "argparse.hpp"
 
-constexpr unsigned BUFFER_SIZE = 2048;
+#define BUFFER_SIZE 2048
 
 int main(int argc, char *argv[]) {
-    if (argc != 7) {
-        std::cerr << "Usage: " << argv[0] << " -s <source_port> -d <destination_port> -p <loss probability>" << std::endl;
+    argparse::ArgumentParser parser("RTP_Stream_Forwarder", "Reads an RTP stream from a socket and forwards it to another socket with a different UDP port");
+
+    parser.add_argument("-s", "--source_port")
+        .help("Source port number")
+        .required()
+        .action([](const std::string& value) { return std::stoi(value); });
+
+    parser.add_argument("-d", "--destination_port")
+        .help("Destination port number")
+        .required()
+        .action([](const std::string& value) { return std::stoi(value); });
+
+    parser.add_argument("-p", "--drop_probability")
+        .help("Drop probability")
+        .required()
+        .action([](const std::string& value) { return std::stof(value); });
+
+    try {
+        parser.parse_args(argc, argv);
+    } catch (const std::runtime_error& err) {
+        std::cerr << err.what() << std::endl;
+        std::cout << parser;
         return 1;
     }
 
-    int sourcePort = 0, destinationPort = 0;
-    float lossProb = 0;
+    int sourcePort = parser.get<int>("--source_port");
+    int destinationPort = parser.get<int>("--destination_port");
+    float dropProbability = parser.get<float>("--drop_probability");
 
-    // Parse command line arguments
-    for (int i = 1; i < argc; i += 2) {
-        if (strcmp(argv[i], "-s") == 0) {
-            sourcePort = std::atoi(argv[i + 1]);
-        } else if (strcmp(argv[i], "-d") == 0) {
-            destinationPort = std::atoi(argv[i + 1]);
-        } else if (strcmp(argv[i], "-p") == 0) {
-            lossProb = std::atof(argv[i + 1]);
-        } else {
-            std::cerr << "Invalid option: " << argv[i] << std::endl;
-            return 1;
-        }
-    }
-
-    if (sourcePort == 0 || destinationPort == 0) {
-        std::cerr << "Invalid port numbers" << std::endl;
+    if (sourcePort == 0 || destinationPort == 0 || dropProbability < 0.0 || dropProbability > 1.0) {
+        std::cerr << "Invalid arguments" << std::endl;
+        std::cout << parser;
         return 1;
     }
 
@@ -72,12 +80,10 @@ int main(int argc, char *argv[]) {
     destinationAddr.sin_family = AF_INET;
     destinationAddr.sin_port = htons(destinationPort);
 
-    std::random_device r;
-    std::default_random_engine e1(r());
-    std::uniform_int_distribution<int> uniform_dist(0, 10000);
-
-    // Forward RTP stream
-    unsigned int pktCnt = 0;
+    // Forward RTP stream with drop probability
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution<float> dis(0.0, 1.0);
     while (true) {
         ssize_t bytesRead = recv(sourceSocket, buffer, BUFFER_SIZE, 0);
         if (bytesRead == -1) {
@@ -88,18 +94,17 @@ int main(int argc, char *argv[]) {
             break;
         }
 
-        pktCnt++;
-        float randVal = static_cast<float>(uniform_dist(e1)) / 10000;
-        if (randVal >= lossProb) {
-            ssize_t bytesSent = sendto(destinationSocket, buffer, bytesRead, 0, (struct sockaddr *)&destinationAddr, sizeof(destinationAddr));
-            if (bytesSent == -1) {
-                perror("Error forwarding to destination socket");
-                break;
-            }
-        } else {
-            printf("dropping packet number %i\n", pktCnt);
+        // Drop packet with probability 'dropProbability'
+        if (dis(gen) < dropProbability) {
+            std::cout << "Dropped packet" << std::endl;
+            continue;
         }
-        pktCnt++;
+
+        ssize_t bytesSent = sendto(destinationSocket, buffer, bytesRead, 0, (struct sockaddr *)&destinationAddr, sizeof(destinationAddr));
+        if (bytesSent == -1) {
+            perror("Error forwarding to destination socket");
+            break;
+        }
     }
 
     // Close sockets
