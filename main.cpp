@@ -7,7 +7,7 @@
 #include <cstring>
 #include "argparse.hpp"
 
-#define BUFFER_SIZE 2048
+constexpr int BUFFER_SIZE = 2048;
 
 int main(int argc, char *argv[]) {
     argparse::ArgumentParser parser("RTP_Stream_Forwarder", "Reads an RTP stream from a socket and forwards it to another socket with a different UDP port");
